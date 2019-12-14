@@ -1,29 +1,26 @@
-import sys
 import zmq
 import random
+import sys
 import time
+import asyncio
 
-port = "5560"
-# Socket to talk to server
-context = zmq.Context()
-socket = context.socket(zmq.SUB)
-print "Collecting updates from server..."
-socket.connect ("tcp://localhost:%s" % port)
+import letterbox.messagebus
 
-ssocket = context.socket(zmq.PUB)
-ssocket.connect("tcp://localhost:%s" % "5559")
+count = 0
+
+def received(bus, msg, args):
+    print(msg.topic)
     
-topicfilter = str(random.randrange(1, 10))
-print topicfilter
+    global count
+    count += 1
+    if(count <= 10):
+        bus.on_recv(received)
 
-socket.setsockopt(zmq.SUBSCRIBE, topicfilter)
-for update_nbr in range(10):
-    string = socket.recv()
-    topic, messagedata = string.split()
-    print topic, messagedata
-
-    if topicfilter != "1":
-        ssocket.send("%d %s" % (1, "beepbeep"))
+def main():
+    bus = letterbox.messagebus.Bus("localhost")
+    bus.subscribe(["test"])
     
-    time.sleep(1)
+    bus.on_recv(received)
 
+main()
+asyncio.get_event_loop().run_forever()

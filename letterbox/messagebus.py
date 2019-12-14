@@ -3,73 +3,101 @@
 import os
 import sys
 import time
+import asyncio
 import zmq
-               
+import zmq.asyncio
+
                                           
 #  _______   
 # |==   []| 
 # |  ==== | *letterbox*
 # '-------'   
 #
-# MessageBus - message passing between components
+# messagebus - message passing between components
 # written by John Lemme, 2019-2020 (jclemme at my dot uri dot edu)
 
-
+        
+class Message:
+    topic = b""
+    data = {}
+    
+    def __init__(self, topic=b"", data={}):
+        self.topic = topic
+        self.data = data
+    
 class Bus:
     server = ""
     ctx = None
     sok_send = None
     sok_recv = None
-    recv_hdlr = None
+    recv_callback = None
     
-    def send(message:Message):
-        socket.send(message.topic, zmq.SENDMORE)
-        socket.send_pyobj(message.messagedata)
+    def __init__(self, server):
+        # Async IO zMQ functions
+        self.ctx = zmq.asyncio.Context.instance()
         
-    def recv_subscriptions_set(subs):
+        self.sok_send = self.ctx.socket(zmq.PUB)
+        self.sok_send.connect("tcp://" + server + ":20550")
+        
+        self.sok_recv = self.ctx.socket(zmq.SUB)
+        self.sok_recv.connect("tcp://" + server + ":20551")
+        
+    def send(self, message:Message):
+        self.sok_send.send(message.topic, zmq.SNDMORE)
+        self.sok_send.send_pyobj(message.data)
+        
+    def subscribe(self, subs):
         for sub in subs:
-            self.sok_recv.setsockopt(zmq.SUBSCRIBE, bytes(sub))
+            self.sok_recv.subscribe(sub)
+
+    def unsubscribe(self, subs):
+        for sub in subs:
+            self.sok_recv.unsubscribe(sub)
+            
+    async def recv(self, handler=None, kwargs={}):
+        message = await self.sok_recv.recv_multipart()
+        message = Message(topic=message[0], data=message[1])
         
-    def recv_handler_set(handler):
-        self.recv_hdlr = handler
+        if(handler == None): return message
+        else: handler(self, message, kwargs)
         
-    def recv_run():
-    
-class Message:
-    type = b""
-    data = {}
-    
-def connect(server):
+    def on_recv(self, handler, optargs={}):
+        asyncio.get_event_loop().create_task(self.recv(handler=handler, kwargs=optargs))
+        
+    def close():
+        self.sok_send.close()
+        self.sok_recv.close()
+        self.ctx.term()
+        
+        
+def server():
 
-
-
-def main_server():
-
-    frontend = None
-    backend = None
-    context = None
+    sok_send = None
+    sok_recv = None
+    ctx = None
+    error = None
     
     try:
-        context = zmq.Context(1)
-        # Socket facing clients
-        frontend = context.socket(zmq.SUB)
-        frontend.bind("tcp://*:5559")
-        
-        frontend.setsockopt(zmq.SUBSCRIBE, b"")
-        
-        # Socket facing services
-        backend = context.socket(zmq.PUB)
-        backend.bind("tcp://*:5560")
+        ctx = zmq.Context()
 
-        zmq.device(zmq.FORWARDER, frontend, backend)
+        sok_recv = ctx.socket(zmq.SUB)
+        sok_recv.bind("tcp://*:20550")
+        sok_recv.subscribe(b"")
+        
+        sok_send = ctx.socket(zmq.PUB)
+        sok_send.bind("tcp://*:20551")
+
+        zmq.device(zmq.FORWARDER, sok_send, sok_recv)
     except Exception as e:
+        error = e
         print(e)
-        print("bringing down zmq device")
     finally:
         pass
-        if frontend != None: frontend.close()
-        if backend != None: backend.close()
-        if context != None: context.term()
+        if sok_send != None: sok_send.close()
+        if sok_recv != None: sok_recv.close()
+        if ctx != None: ctx.term()
 
+    return error
+    
 if __name__ == "__main__":
-    main_server()
+    server()
